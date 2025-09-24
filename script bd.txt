@@ -1,0 +1,203 @@
+use agendadb 
+
+CREATE TABLE citas (
+    id INT PRIMARY KEY IDENTITY(1,1),
+    nombre NVARCHAR(100),
+    apellido NVARCHAR(100),
+    telefono NVARCHAR(20),
+	correo VARCHAR(100);
+    direccion NVARCHAR(255),
+    domicilio BIT,
+    fecha DATE,
+    hora TIME
+);
+
+USE agendadb;
+GO
+
+-- Modificar tabla existente
+ALTER TABLE citas
+ADD correo VARCHAR(100),
+    id_pago INT,
+    id_empresa INT,
+    numero_ticket VARCHAR(50),
+    cantidad_productos INT;
+GO
+
+CREATE TABLE pagos (
+    id_pago INT PRIMARY KEY IDENTITY(1,1),
+    metodo NVARCHAR(50),
+    valor DECIMAL(10, 2)
+);
+
+CREATE TABLE empresas (
+    id_empresa INT PRIMARY KEY IDENTITY(1,1),
+    nombre NVARCHAR(100),
+    descripcion NVARCHAR(255)
+);
+-- Tabla de productos
+CREATE TABLE productos (
+    id_producto INT PRIMARY KEY IDENTITY(1,1),
+	nombre NVARCHAR(100),
+    descripcion NVARCHAR(255)
+);
+
+--Tabla intermedia cita_productos, Relaciona múltiples productos con una cita.
+
+CREATE TABLE cita_productos (
+    id INT PRIMARY KEY IDENTITY(1,1),
+    id_cita INT,
+    id_producto INT,
+    FOREIGN KEY (id_cita) REFERENCES citas(id),
+    FOREIGN KEY (id_producto) REFERENCES productos(id_producto)
+);
+
+--llaves foraneas
+ALTER TABLE citas
+ADD CONSTRAINT FK_Citas_Pagos FOREIGN KEY (id_pago) REFERENCES pagos(id_pago);
+
+ALTER TABLE citas
+ADD CONSTRAINT FK_Citas_Empresas FOREIGN KEY (id_empresa) REFERENCES empresas(id_empresa);
+
+-- Insertar productos en la tabla productos
+INSERT INTO productos (nombre, descripcion) VALUES
+('Cápsula Esencia', 'Cápsula con extracto esencial de planta. Ideal para consumidores que buscan una experiencia relajante.'),
+('Batería Brass', 'Batería de alta calidad, perfecta para mantener la temperatura constante durante el consumo.'),
+('Batería Beleaf', 'Batería con diseño elegante, optimizada para extractos concentrados y aceites.'),
+('Batería Discreta', 'Batería compacta y discreta, ideal para aquellos que buscan portabilidad.'),
+('Combo 1 (Batería Brass + Cápsula)', 'Combo que incluye la batería Brass y una cápsula de esencia para una experiencia completa.'),
+('Combo 2 (Batería Beleaf + Cápsula)', 'Combo con la batería Beleaf y una cápsula de esencia, perfecto para el disfrute de concentrados.'),
+('Combo 3 (Batería Discreta + Cápsula)', 'Combo con la batería Discreta y cápsula de esencia, ideal para quienes buscan discreción y rendimiento.');
+
+-- Insertar empresas en la tabla empresas
+INSERT INTO empresas (nombre, descripcion) VALUES
+('Stoned Fox', 'Tienda especializada en productos de cannabis y accesorios.', 1),
+('MovilThc', 'Distribuidor de productos móviles para el consumo de extractos y concentrados.', 1),
+('Plexo Store', 'Tienda en línea con una amplia gama de productos de bienestar y salud relacionados con el cannabis.', 1),
+('VaperOne', 'Tienda especializada en productos de cannabis y accesorios.', 1);
+
+-- Crear tabla citas_anuladas para registrar citas anuladas
+CREATE TABLE citas_anuladas (
+    id INT PRIMARY KEY IDENTITY(1,1),
+    id_cita INT,
+    fecha_anulacion DATE,
+    comentario NVARCHAR(255),
+    FOREIGN KEY (id_cita) REFERENCES citas(id)
+);
+
+--crear tabla citas modificadas
+CREATE TABLE citas_modificadas (
+    id INT PRIMARY KEY IDENTITY(1,1),
+    id_cita INT,
+    fecha_modificacion DATE,
+    comentario NVARCHAR(255),
+    FOREIGN KEY (id_cita) REFERENCES citas(id)
+);
+
+-- Procedimiento almacenado para insertar una nueva cita
+CREATE PROCEDURE InsertarCita
+    @nombre NVARCHAR(100),
+    @apellido NVARCHAR(100),
+    @telefono NVARCHAR(20),
+    @correo VARCHAR(100),
+    @direccion NVARCHAR(255),
+    @domicilio BIT,
+    @fecha DATE,
+    @hora TIME,
+    @id_pago INT,
+    @id_empresa INT,
+    @numero_ticket VARCHAR(50),
+    @cantidad_productos INT
+AS
+BEGIN
+    INSERT INTO citas (nombre, apellido, telefono, correo, direccion, domicilio, fecha, hora, id_pago, id_empresa, numero_ticket, cantidad_productos)
+    VALUES (@nombre, @apellido, @telefono, @correo, @direccion, @domicilio, @fecha, @hora, @id_pago, @id_empresa, @numero_ticket, @cantidad_productos);
+END;
+-- Procedimiento almacenado para modificar una cita existente
+CREATE PROCEDURE ModificarCita
+    @id INT,
+    @nombre NVARCHAR(100),
+    @apellido NVARCHAR(100),
+    @telefono NVARCHAR(20),
+    @correo VARCHAR(100),
+    @direccion NVARCHAR(255),
+    @domicilio BIT,
+    @fecha DATE,
+    @hora TIME,
+    @id_pago INT,
+    @id_empresa INT,
+    @numero_ticket VARCHAR(50),
+    @cantidad_productos INT
+AS
+BEGIN
+    UPDATE citas
+    SET nombre = @nombre,
+        apellido = @apellido,
+        telefono = @telefono,
+        correo = @correo,
+        direccion = @direccion,
+        domicilio = @domicilio,
+        fecha = @fecha,
+        hora = @hora,
+        id_pago = @id_pago,
+        id_empresa = @id_empresa,
+        numero_ticket = @numero_ticket,
+        cantidad_productos = @cantidad_productos
+    WHERE id = @id;
+END;
+
+-- Procedimiento almacenado para anular una cita
+CREATE PROCEDURE AnularCita
+    @id INT,
+    @comentario NVARCHAR(255)
+AS
+BEGIN
+    -- Insertar en la tabla citas_anuladas
+    INSERT INTO citas_anuladas (id_cita, fecha_anulacion, comentario)
+    VALUES (@id, GETDATE(), @comentario);
+
+    -- Eliminar la cita de la tabla citas
+    DELETE FROM citas WHERE id = @id;
+END;
+-- Procedimiento almacenado para consultar citas modificadas y anuladas
+CREATE OR ALTER PROCEDURE ConsultarCitasModificadasYAnuladas
+AS
+BEGIN
+    -- Citas que están modificadas (aquí podrías llevar un control adicional si lo necesitas)
+    SELECT 
+        c.id, c.nombre, c.apellido, c.telefono, c.fecha, c.hora, 
+        'Modificada' AS estado
+    FROM citas c
+    WHERE c.id IN (SELECT id_cita FROM citas_anuladas) -- Suponiendo que luego restauras una cita o la marcas como modificada
+
+    UNION
+
+    -- Citas anuladas (se consultan desde la tabla citas_anuladas y se une con citas para obtener los datos)
+    SELECT 
+        c.id, c.nombre, c.apellido, c.telefono, c.fecha, c.hora, 
+        'Anulada' AS estado
+    FROM citas_anuladas ca
+    INNER JOIN citas c ON ca.id_cita = c.id;
+END;
+
+-- 2. Agrega la relación con la tabla productos
+-- ✅ Crear nueva tabla intermedia
+CREATE TABLE empresa_productos (
+    id_empresa INT,
+    id_producto INT,
+    PRIMARY KEY (id_empresa, id_producto),
+    FOREIGN KEY (id_empresa) REFERENCES empresas(id_empresa),
+    FOREIGN KEY (id_producto) REFERENCES productos(id_producto)
+);
+
+ALTER TABLE empresa_productos 
+ADD CONSTRAINT FK_empresa_productos_productos
+FOREIGN KEY (id_producto) REFERENCES productos(id_producto);
+
+
+-- 🔁 Relacionar varias empresas con varios productos
+INSERT INTO empresa_productos (id_empresa, id_producto) VALUES
+(1, 1), (1, 2), (1, 5), -- Stoned Fox: varios productos
+(2, 2), (2, 3),         -- MovilThc
+(3, 4), (3, 6),         -- Plexo Store
+(4, 1), (4, 7);         -- VaperOne
