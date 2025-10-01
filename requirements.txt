@@ -3,3 +3,5 @@ uvicorn
 pyodbc
 sqlalchemy
 pydantic
+pymysql
+python-dotenv
