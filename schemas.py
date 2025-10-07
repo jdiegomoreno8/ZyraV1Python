@@ -1,3 +1,4 @@
+# schemas.py
 from pydantic import BaseModel, EmailStr
 from datetime import date, time
 from typing import List, Optional
@@ -33,6 +34,8 @@ class CitaCreate(BaseModel):
     costo_domicilio: Optional[float] = None
     #  Esquema producto por cantidad
     productos: Optional[List[ProductoCantidad]] = []
+    observaciones: Optional[str] = None
+    metodo_envio: Optional[str] = None
 
 # Producto dentro de una cita con precio
 class ProductoEnCita(BaseModel):
@@ -60,14 +63,12 @@ class CitaRead(BaseModel):
     id_empresa: Optional[int]
     numero_ticket: Optional[str]
     cantidad_productos: Optional[int]
-
-    productos: List[ProductoEnCita] = []  # ⬅️ Ajustado aquí
-
+    productos: List[ProductoEnCita] = []
     distancia_km: Optional[float] = None
     costo_domicilio: Optional[float] = None
-
     valor_productos: Optional[float] = None
     total_pagar: Optional[float] = None
+    observaciones: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -87,9 +88,14 @@ class EmpresaSchema(BaseModel):
     id_empresa: int
     nombre: str
     descripcion: Optional[str] = None
+    direccion: Optional[str] = None
 
     class Config:
         from_attributes = True
+class EmpresaCreate(BaseModel):
+    nombre: str
+    descripcion: Optional[str] = None
+    direccion: Optional[str] = None
 
 
 # Esquema completo para producto

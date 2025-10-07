@@ -1,16 +1,18 @@
+# main.py
 import json
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from datetime import date
-from typing import List
+from typing import List, Optional
 from database import SessionLocal, engine, Base, get_db
 from crud import crear_cita, cita_a_dict, guardar_cita_anulada, anular_cita
 from models import Cita, Empresa, Pago, Producto, CitaAnulada, CitaModificada, CitaProducto
 from schemas import (
     CitaCreate,
     CitaRead,
+    EmpresaCreate,
     EmpresaSchema,
     PagoSchema,
     ProductoSchema,
@@ -67,17 +69,17 @@ def crear_producto(descripcion: str, db: Session = Depends(get_db)):
     }
 
 #  Crear una empresa
-@app.post("/empresas")
-def crear_empresa(nombre: str, descripcion: str = None, db: Session = Depends(get_db)):
-    emp = Empresa(nombre=nombre, descripcion=descripcion)
+@app.post("/empresas", response_model=EmpresaSchema)
+def crear_empresa(empresa: EmpresaCreate, db: Session = Depends(get_db)):
+    emp = Empresa(
+        nombre=empresa.nombre,
+        descripcion=empresa.descripcion,
+        direccion=empresa.direccion
+    )
     db.add(emp)
     db.commit()
     db.refresh(emp)
-    return {
-        "id_empresa": emp.id_empresa,
-        "nombre": emp.nombre,
-        "descripcion": emp.descripcion,
-    }
+    return emp
 
 #  Obtener empresa por ID
 @app.get("/empresas/{id_empresa}", response_model=EmpresaSchema)
@@ -105,11 +107,19 @@ def obtener_productos_por_empresa(id_empresa: int, db: Session = Depends(get_db)
 
 #  Obtener horas ocupadas en una fecha
 @app.get("/citas/ocupadas", response_model=List[str])
-def obtener_horas_ocupadas(fecha: date, id_empresa: int = None, db: Session = Depends(get_db)):
-    query = db.query(Cita).filter(Cita.fecha == fecha)
-    if id_empresa:
-        query = query.filter(Cita.id_empresa == id_empresa)
-    citas = query.all()
+def obtener_horas_ocupadas(
+    fecha: date = Query(...),
+    id_empresa: Optional[int] = Query(None),
+    db: Session = Depends(get_db)
+):
+    if not id_empresa:
+        raise HTTPException(status_code=400, detail="Debe especificar id_empresa")
+    
+    citas = db.query(Cita).filter(
+        Cita.fecha == fecha,
+        Cita.id_empresa == id_empresa
+    ).all()
+
     return [cita.hora.strftime("%H:%M:%S") for cita in citas]
 
 # Obtener todos los métodos de pago disponibles
@@ -161,3 +171,8 @@ def historial_cita(cita_id: int, db: Session = Depends(get_db)):
         "modificaciones": [json.loads(mod.datos_anteriores) for mod in modificaciones],
         "anulaciones": [{"fecha": a.fecha_anulacion, "comentario": a.comentario} for a in anulaciones]
     }
+
+# Log en el backend
+@app.post("/citas", response_model=CitaRead)
+def guardar_cita(cita: CitaCreate, db: Session = Depends(get_db)):
+    print("CITA RECIBIDA:", cita.dict())  # <-- DEBUG

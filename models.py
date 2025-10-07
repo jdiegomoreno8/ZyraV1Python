@@ -1,3 +1,4 @@
+# models.py
 from sqlalchemy import Column, Integer, String, ForeignKey, Boolean, DateTime, Time, Float, DECIMAL, Table, Date
 from sqlalchemy.orm import relationship
 from database import Base
@@ -29,6 +30,7 @@ class Empresa(Base):
     id_empresa = Column(Integer, primary_key=True, index=True)
     nombre = Column(String)
     descripcion = Column(String)
+    direccion = Column(String)
     productos = relationship(
         "Producto",
         secondary=empresa_productos,
@@ -70,7 +72,7 @@ class Cita(Base):
     domicilio = Column(Boolean)
     fecha = Column(Date)
     hora = Column(Time)
-    # Campos nuevos para domicilio
+    # Campos para domicilio
     distancia_km = Column(Float, nullable=True)        # Distancia estimada para el domicilio
     costo_domicilio = Column(Float, nullable=True)     # Costo calculado para el domicilio
     # Relaciones
@@ -87,6 +89,7 @@ class Cita(Base):
     total_pagar = Column(Float, nullable=True)
     estado = Column(String(20), nullable=False, default="activa")
     productos = relationship("CitaProducto", back_populates="cita", cascade="all, delete-orphan")
+    observaciones = Column(String(500), nullable=True)
 
 # Manejo de estados
 class CitaAnulada(Base):

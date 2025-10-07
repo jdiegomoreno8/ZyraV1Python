@@ -5,3 +5,4 @@ sqlalchemy
 pydantic
 pymysql
 python-dotenv
+twilio

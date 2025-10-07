@@ -1,8 +1,10 @@
+# crud.py
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 from models import Cita, Producto, Pago, Empresa, CitaProducto, CitaModificada, CitaAnulada
 from schemas import CitaCreate
 from datetime import datetime
+from notificaciones import enviar_email, enviar_whatsapp
 import uuid  # Para generar el número de ticket
 import json
 
@@ -23,7 +25,6 @@ def parsear_hora(hora_str: str) -> datetime.time:
 def generar_ticket():
     return f"TCK-{uuid.uuid4().hex[:8].upper()}"
 
-
 #  Crear una nueva cita con domicilio, productos, etc.
 def crear_cita(db: Session, cita: CitaCreate):
     pago = db.query(Pago).filter(Pago.id_pago == cita.id_pago).first() if cita.id_pago else None
@@ -31,8 +32,7 @@ def crear_cita(db: Session, cita: CitaCreate):
 
     valor_productos = 0.0
     cantidad_total_productos = 0
-
-    productos_detalle = {}  
+    productos_detalle = {}
     productos_ids = [p.id_producto for p in cita.productos]
 
     if productos_ids:
@@ -72,11 +72,12 @@ def crear_cita(db: Session, cita: CitaCreate):
         costo_domicilio=costo_domicilio,
         valor_productos=valor_productos,
         total_pagar=total_pagar,
-        estado="activa"  # 👈 Nuevo campo
+        estado="activa",
+        observaciones=cita.observaciones
     )
 
     db.add(nueva)
-    db.flush()  # 👈 Se asegura de que nueva.id exista sin hacer commit todavía
+    db.flush()  # Se asegura de que nueva.id exista sin hacer commit todavía
 
     # Asociar productos con cantidad y descontar stock
     if productos_ids:
@@ -93,12 +94,23 @@ def crear_cita(db: Session, cita: CitaCreate):
             if prod.cantidad_existente is not None:
                 prod.cantidad_existente -= cantidad
 
-    #  Un solo commit al final, asegura consistencia
     db.commit()
     db.refresh(nueva)
 
-    return cita_a_dict(nueva)
+    # Notificación al cliente según el método
+    metodo = getattr(cita, "metodo_envio", None)
+    if metodo == "correo":
+        print("Enviando confirmación por correo...")
+        enviar_email(nueva)
+    elif metodo == "whatsapp":
+        print("Enviando confirmación por WhatsApp...")
+        enviar_whatsapp(nueva)
+    else:
+        print("No se especificó un método de envío válido.")
 
+    print("Método de envío recibido:", metodo)
+
+    return cita_a_dict(nueva)
 
 #Función auxiliar qie convierte objeto Cita en diccionario de CitaRead
 def cita_a_dict(cita: Cita) -> dict:
@@ -107,7 +119,8 @@ def cita_a_dict(cita: Cita) -> dict:
             "id_producto": cp.producto.id_producto,
             "nombre": cp.producto.nombre,
             "precio_unitario": cp.precio_unitario,
-            "cantidad": cp.cantidad
+            "cantidad": cp.cantidad,
+            "observaciones": cita.observaciones,
         }
         for cp in cita.cita_productos
     ]
