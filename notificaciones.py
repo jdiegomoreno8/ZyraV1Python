@@ -5,23 +5,22 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from twilio.rest import Client
 from models import Cita  # Asegúrate de que este modelo esté definido correctamente
+import os
+from dotenv import load_dotenv
 
+load_dotenv()
 # -------------------------------
 # CONFIGURACIÓN SMTP (Correo)
 # -------------------------------
 
 SMTP_HOST = "smtp.gmail.com"
 SMTP_PORT = 587
-SMTP_USER = "kaelcraft@gmail.com"
-SMTP_PASS = "tgxrtrbtlrakxzmf"
 
-# -------------------------------
-# CONFIGURACIÓN TWILIO (WhatsApp)
-# -------------------------------
+SMTP_USER = os.getenv("SMTP_USER")
+SMTP_PASS = os.getenv("SMTP_PASS")
+TWILIO_SID = os.getenv("TWILIO_ACCOUNT_SID") 
+TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")
 
-TWILIO_SID = "AC0f199cc91b27278de7bd2feb5d393fe4"
-TWILIO_AUTH_TOKEN = "b2ec1f86370ce9745e2372a9ec1dd9a6"
-TWILIO_WHATSAPP_NUMBER = "whatsapp:+14155238886"
 
 # SID del mensaje preaprobado en Twilio (Template en la consola)
 TWILIO_TEMPLATE_SID = "HXb5b62575e6e4ff6129ad7c8efe1f983e"
@@ -30,7 +29,7 @@ TWILIO_TEMPLATE_SID = "HXb5b62575e6e4ff6129ad7c8efe1f983e"
 # FUNCIÓN: Enviar Correo
 # -------------------------------
 
-def enviar_email(cita: Cita):
+def enviar_email(cita: Cita, codigo: str):
     msg = MIMEMultipart()
     msg["From"] = SMTP_USER
     msg["To"] = cita.correo
@@ -43,6 +42,9 @@ def enviar_email(cita: Cita):
     Dirección: {cita.direccion}
     Total a pagar: ${cita.total_pagar:.2f}
 
+      Tu código de verificación es: {codigo}
+      (Este código guardalo porqué se necesita si deseas modificar tu pedido o cancelarlo)
+
     Gracias por confiar en nosotros.
     """
 
@@ -53,35 +55,33 @@ def enviar_email(cita: Cita):
             server.starttls()
             server.login(SMTP_USER, SMTP_PASS)
             server.sendmail(SMTP_USER, cita.correo, msg.as_string())
-        print("✅ Correo enviado correctamente.")
+        print("Correo enviado correctamente.")
     except Exception as e:
-        print("❌ Error al enviar el correo:", e)
+        print("Error al enviar el correo:", e)
 
 # -------------------------------
-# FUNCIÓN: Enviar WhatsApp
+# FUNCIÓN: Enviar SMS
 # -------------------------------
 
-def enviar_whatsapp(cita: Cita):
+def enviar_sms(cita: Cita, codigo: str):
     client = Client(TWILIO_SID, TWILIO_AUTH_TOKEN)
 
-    content_variables = {
-        "1": cita.fecha.strftime("%d/%m/%Y"),
-        "2": cita.hora.strftime("%I:%M %p")
-    }
+    cuerpo_sms = (
+        f"Hola {cita.nombre}, tu cita ha sido confirmada para el {cita.fecha.strftime('%d/%m/%Y')} "
+        f"a las {cita.hora.strftime('%H:%M')}.\nDirección: {cita.direccion}.\n"
+        f"Código de verificación: {codigo}\n"
+        f"(Este código guárdalo porque se necesita si deseas modificar tu pedido o cancelarlo)\n"
+        f"Total a pagar: ${cita.total_pagar:.2f}"
+    )
 
-    numero_destino = f"whatsapp:+57{cita.telefono}"
-
-    print("🔍 Enviando WhatsApp a:", numero_destino)
-    print("📦 Variables del template:", content_variables)
-    print("📨 Desde:", TWILIO_WHATSAPP_NUMBER)
+    numero_destino = f"+57{cita.telefono}"
 
     try:
         message = client.messages.create(
-            from_=TWILIO_WHATSAPP_NUMBER,
-            to=numero_destino,
-            content_sid=TWILIO_TEMPLATE_SID,
-            content_variables=str(content_variables).replace("'", '"')
+            body=cuerpo_sms,
+            from_="+15703644363",  # Usa tu número de Twilio SMS aquí
+            to=numero_destino
         )
-        print("✅ WhatsApp enviado correctamente:", message.sid)
+        print("✅ SMS enviado correctamente:", message.sid)
     except Exception as e:
-        print("❌ Error al enviar WhatsApp:", e)
+        print("❌ Error al enviar SMS:", e)

@@ -1,10 +1,14 @@
 # crud.py
 from fastapi import HTTPException
+from sqlalchemy import text
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import SQLAlchemyError
 from models import Cita, Producto, Pago, Empresa, CitaProducto, CitaModificada, CitaAnulada
 from schemas import CitaCreate
 from datetime import datetime
-from notificaciones import enviar_email, enviar_whatsapp
+from notificaciones import enviar_email, enviar_sms
+import random
+import string
 import uuid  # Para generar el número de ticket
 import json
 
@@ -25,94 +29,17 @@ def parsear_hora(hora_str: str) -> datetime.time:
 def generar_ticket():
     return f"TCK-{uuid.uuid4().hex[:8].upper()}"
 
-#  Crear una nueva cita con domicilio, productos, etc.
-def crear_cita(db: Session, cita: CitaCreate):
-    pago = db.query(Pago).filter(Pago.id_pago == cita.id_pago).first() if cita.id_pago else None
-    empresa = db.query(Empresa).filter(Empresa.id_empresa == cita.id_empresa).first() if cita.id_empresa else None
+# Generador de ticket personalizado
+def generar_ticket_personalizado(empresa: Empresa) -> str:
+    prefijo = empresa.codigo_ticket or "TCK"
+    sufijo = uuid.uuid4().hex[:8].upper()
+    return f"{prefijo}-{sufijo}"
 
-    valor_productos = 0.0
-    cantidad_total_productos = 0
-    productos_detalle = {}
-    productos_ids = [p.id_producto for p in cita.productos]
+# Generar código de verificación
+def generar_codigo(length: int = 6) -> str:
+    return ''.join(random.choices(string.ascii_uppercase + string.digits, k=length))
 
-    if productos_ids:
-        productos_detalle = {p.id_producto: p.cantidad for p in cita.productos}
-        productos_objs = db.query(Producto).filter(Producto.id_producto.in_(productos_ids)).all()
-
-        for prod in productos_objs:
-            cantidad = productos_detalle.get(prod.id_producto, 0)
-
-            # Validar stock
-            if prod.cantidad_existente is not None and prod.cantidad_existente < cantidad:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"El producto '{prod.nombre}' no tiene suficiente stock. Disponible: {prod.cantidad_existente}, requerido: {cantidad}"
-                )
-
-            valor_productos += (prod.precio or 0.0) * cantidad
-            cantidad_total_productos += cantidad
-
-    costo_domicilio = cita.costo_domicilio if cita.domicilio.lower() == 'si' else 0.0
-    total_pagar = valor_productos + (costo_domicilio or 0.0)
-
-    nueva = Cita(
-        nombre=cita.nombre,
-        apellido=cita.apellido,
-        telefono=cita.telefono,
-        correo=cita.correo,
-        direccion=cita.direccion if cita.domicilio.lower() == 'si' else 'Recoge en tienda',
-        domicilio=(cita.domicilio.lower() == 'si'),
-        fecha=cita.fecha,
-        hora=parsear_hora(cita.hora),
-        id_pago=cita.id_pago,
-        id_empresa=cita.id_empresa,
-        numero_ticket=cita.numero_ticket or generar_ticket(),
-        cantidad_productos=cantidad_total_productos,
-        distancia_km=cita.distancia_km,
-        costo_domicilio=costo_domicilio,
-        valor_productos=valor_productos,
-        total_pagar=total_pagar,
-        estado="activa",
-        observaciones=cita.observaciones
-    )
-
-    db.add(nueva)
-    db.flush()  # Se asegura de que nueva.id exista sin hacer commit todavía
-
-    # Asociar productos con cantidad y descontar stock
-    if productos_ids:
-        for prod in productos_objs:
-            cantidad = productos_detalle.get(prod.id_producto, 0)
-            relacion = CitaProducto(
-                id_cita=nueva.id,
-                id_producto=prod.id_producto,
-                cantidad=cantidad,
-                precio_unitario=prod.precio
-            )
-            db.add(relacion)
-
-            if prod.cantidad_existente is not None:
-                prod.cantidad_existente -= cantidad
-
-    db.commit()
-    db.refresh(nueva)
-
-    # Notificación al cliente según el método
-    metodo = getattr(cita, "metodo_envio", None)
-    if metodo == "correo":
-        print("Enviando confirmación por correo...")
-        enviar_email(nueva)
-    elif metodo == "whatsapp":
-        print("Enviando confirmación por WhatsApp...")
-        enviar_whatsapp(nueva)
-    else:
-        print("No se especificó un método de envío válido.")
-
-    print("Método de envío recibido:", metodo)
-
-    return cita_a_dict(nueva)
-
-#Función auxiliar qie convierte objeto Cita en diccionario de CitaRead
+# Función auxiliar que convierte objeto Cita en diccionario
 def cita_a_dict(cita: Cita) -> dict:
     productos_con_precios = [
         {
@@ -141,11 +68,111 @@ def cita_a_dict(cita: Cita) -> dict:
         "cantidad_productos": cita.cantidad_productos,
         "productos": productos_con_precios,
         "distancia_km": cita.distancia_km,
-        "costo_domicilio": cita.costo_domicilio,            
+        "costo_domicilio": cita.costo_domicilio,
         "valor_productos": cita.valor_productos,
         "total_pagar": cita.total_pagar,
-        "estado": cita.estado  # Nuevo campo
+        "estado": cita.estado
     }
+
+# Crear una nueva cita con domicilio, productos, etc.
+def crear_cita(db: Session, cita: CitaCreate):
+    pago = db.query(Pago).filter(Pago.id_pago == cita.id_pago).first() if cita.id_pago else None
+    empresa = db.query(Empresa).filter(Empresa.id_empresa == cita.id_empresa).first() if cita.id_empresa else None
+
+    valor_productos = 0.0
+    cantidad_total_productos = 0
+    productos_detalle = {}
+    productos_ids = [p.id_producto for p in cita.productos]
+
+    if productos_ids:
+        productos_detalle = {p.id_producto: p.cantidad for p in cita.productos}
+        productos_objs = db.query(Producto).filter(Producto.id_producto.in_(productos_ids)).all()
+
+        for prod in productos_objs:
+            cantidad = productos_detalle.get(prod.id_producto, 0)
+
+            if prod.cantidad_existente is not None and prod.cantidad_existente < cantidad:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"El producto '{prod.nombre}' no tiene suficiente stock. Disponible: {prod.cantidad_existente}, requerido: {cantidad}"
+                )
+
+            valor_productos += (prod.precio or 0.0) * cantidad
+            cantidad_total_productos += cantidad
+
+    costo_domicilio = cita.costo_domicilio if cita.domicilio.lower() == 'si' else 0.0
+    total_pagar = valor_productos + (costo_domicilio or 0.0)
+
+    nueva = Cita(
+        nombre=cita.nombre,
+        apellido=cita.apellido,
+        telefono=cita.telefono,
+        correo=cita.correo,
+        direccion=cita.direccion if cita.domicilio.lower() == 'si' else 'Recoge en tienda',
+        domicilio=(cita.domicilio.lower() == 'si'),
+        fecha=cita.fecha,
+        hora=parsear_hora(cita.hora),
+        id_pago=cita.id_pago,
+        id_empresa=cita.id_empresa,
+        numero_ticket=cita.numero_ticket or generar_ticket_personalizado(empresa),
+        cantidad_productos=cantidad_total_productos,
+        distancia_km=cita.distancia_km,
+        costo_domicilio=costo_domicilio,
+        valor_productos=valor_productos,
+        total_pagar=total_pagar,
+        estado="activa",
+        observaciones=cita.observaciones
+    )
+
+    db.add(nueva)
+    db.flush()  # Obtener nueva.id
+
+    if productos_ids:
+        for prod in productos_objs:
+            cantidad = productos_detalle.get(prod.id_producto, 0)
+            relacion = CitaProducto(
+                id_cita=nueva.id,
+                id_producto=prod.id_producto,
+                cantidad=cantidad,
+                precio_unitario=prod.precio
+            )
+            db.add(relacion)
+            if prod.cantidad_existente is not None:
+                prod.cantidad_existente -= cantidad
+
+    # Generar código verificación y guardar relación con procedimiento almacenado
+    codigo_verificacion = generar_codigo()
+
+    sql = text("""
+    EXEC InsertarRelacionCodigoCita
+        @id_cita=:id_cita,
+        @numero_ticket=:numero_ticket,
+        @codigo_generado=:codigo,
+        @estado=:estado
+    """)
+    try:
+        db.execute(sql, {
+            "id_cita": nueva.id,
+            "numero_ticket": nueva.numero_ticket,
+            "codigo": codigo_verificacion,
+            "estado": "activo"
+        })
+        db.commit()
+    except SQLAlchemyError as e:
+        db.rollback()
+        print("[ERROR SQLALCHEMY]", e)
+        raise HTTPException(status_code=500, detail="Error en el procedimiento almacenado")
+
+    # Enviar notificación si se especifica método de envío
+    metodo_envio = getattr(cita, "metodo_envio", None)
+    if metodo_envio == "correo":
+        enviar_email(nueva, codigo_verificacion)
+    elif metodo_envio == "sms":
+        enviar_sms(nueva, codigo_verificacion)
+    else:
+        print("No se envió notificación: método_envio no especificado o inválido.")
+
+    return cita_a_dict(nueva)
 
 def anular_cita(db: Session, cita_id: int, comentario: str):
     cita = db.query(Cita).filter(Cita.id == cita_id).first()
@@ -170,18 +197,15 @@ def anular_cita(db: Session, cita_id: int, comentario: str):
     db.commit()
     return {"mensaje": "Cita anulada exitosamente", "id": cita.id}
 
-
-
-# Modificar cita
 def modificar_cita(db: Session, cita_id: int, datos: CitaCreate):
     cita = db.query(Cita).filter(Cita.id == cita_id).first()
     if not cita:
         raise HTTPException(status_code=404, detail="Cita no encontrada")
-    
-    #  Guardar copia previa en historial
+
+    # Guardar copia previa en historial
     guardar_cita_modificada(db, cita)
 
-    # --- Actualizar datos principales ---
+    # Actualizar datos principales
     cita.nombre = datos.nombre
     cita.apellido = datos.apellido
     cita.telefono = datos.telefono
@@ -195,16 +219,15 @@ def modificar_cita(db: Session, cita_id: int, datos: CitaCreate):
     cita.distancia_km = datos.distancia_km
     cita.costo_domicilio = datos.costo_domicilio if datos.domicilio.lower() == 'si' else 0.0
 
-    # --- Resetear productos anteriores ---
+    # Resetear productos anteriores y devolver stock
     for rel in cita.cita_productos:
-        # Devolver stock
         if rel.producto.cantidad_existente is not None:
             rel.producto.cantidad_existente += rel.cantidad
         db.delete(rel)
 
     db.flush()
 
-    # --- Agregar los nuevos productos ---
+    # Agregar los nuevos productos
     valor_productos = 0.0
     cantidad_total_productos = 0
     productos_detalle = {p.id_producto: p.cantidad for p in datos.productos}
@@ -243,7 +266,6 @@ def modificar_cita(db: Session, cita_id: int, datos: CitaCreate):
     db.refresh(cita)
     return cita_a_dict(cita)
 
-# Estados de la cita
 def guardar_cita_modificada(db: Session, cita: Cita):
     datos = cita_a_dict(cita)  # Convertir a dict
     modificacion = CitaModificada(
@@ -251,8 +273,7 @@ def guardar_cita_modificada(db: Session, cita: Cita):
         datos_anteriores=json.dumps(datos, default=str)
     )
     db.add(modificacion)
-
-    from models import CitaAnulada
+    db.commit()
 
 def guardar_cita_anulada(db: Session, cita: Cita, comentario: str = "Anulación desde sistema"):
     anulacion = CitaAnulada(

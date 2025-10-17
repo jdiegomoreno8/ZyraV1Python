@@ -13,8 +13,8 @@ class CitaProducto(Base):
     precio_unitario = Column(DECIMAL(10, 2), nullable=True)
     # relaciones:
     producto = relationship("Producto", back_populates="cita_productos")
-    # FALTA ESTA LINEA:
-    cita = relationship("Cita", back_populates="productos")
+    cita = relationship("Cita", back_populates="cita_productos")
+
 
 # Tabla intermedia
 empresa_productos = Table(
@@ -31,6 +31,7 @@ class Empresa(Base):
     nombre = Column(String)
     descripcion = Column(String)
     direccion = Column(String)
+    codigo_ticket = Column(String(10), nullable=True)
     productos = relationship(
         "Producto",
         secondary=empresa_productos,
@@ -88,8 +89,8 @@ class Cita(Base):
     valor_productos = Column(Float, nullable=True)
     total_pagar = Column(Float, nullable=True)
     estado = Column(String(20), nullable=False, default="activa")
-    productos = relationship("CitaProducto", back_populates="cita", cascade="all, delete-orphan")
-    observaciones = Column(String(500), nullable=True)
+    productos = relationship("Producto", secondary="cita_productos", overlaps="cita_productos,cita,producto")
+    observaciones = Column(String(500), nullable=True)    
 
 # Manejo de estados
 class CitaAnulada(Base):
@@ -106,3 +107,16 @@ class CitaModificada(Base):
     id_cita = Column(Integer, nullable=False)
     fecha_modificacion = Column(DateTime, default=datetime.utcnow)
     datos_anteriores = Column(String)  # Puedes usar JSON si usas PostgreSQL
+
+    
+class RelacionCodigoCita(Base):
+    __tablename__ = "relacion_codigo_cita"
+    id_relacion = Column(Integer, primary_key=True, index=True)
+    id_cita = Column(Integer, ForeignKey("citas.id"), nullable=False)
+    numero_ticket = Column(String(50), nullable=False)
+    codigo_generado = Column(String(50), nullable=False)
+    estado = Column(String(20), default="activo")
+    fecha_creacion = Column(DateTime, default=datetime.utcnow)
+
+    # relación inversa (opcional)
+    cita = relationship("Cita", backref="relaciones_codigo")

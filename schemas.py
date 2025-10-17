@@ -1,6 +1,6 @@
 # schemas.py
 from pydantic import BaseModel, EmailStr
-from datetime import date, time
+from datetime import date, datetime, time
 from typing import List, Optional
 
 # Producto base para incluir en otras respuestas
@@ -54,7 +54,8 @@ class CitaRead(BaseModel):
     nombre: str
     apellido: str
     telefono: str
-    correo: EmailStr
+    # correo: EmailStr
+    correo: Optional[EmailStr] = None
     direccion: str
     domicilio: bool
     fecha: date
@@ -117,3 +118,12 @@ class EmpresaWithProductos(EmpresaSchema):
     class Config:
         from_attributes = True
 
+class CodigoCitaResponse(BaseModel):
+    id_cita: int
+    numero_ticket: str
+    codigo_generado: str
+    estado: str
+    fecha_creacion: datetime
+
+    class Config:
+        from_attributes = True

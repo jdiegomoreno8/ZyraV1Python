@@ -1,17 +1,19 @@
 # main.py
 import json
-from fastapi import FastAPI, Depends, HTTPException, Query
+from fastapi import Body, FastAPI, Depends, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from datetime import date
 from typing import List, Optional
 from database import SessionLocal, engine, Base, get_db
-from crud import crear_cita, cita_a_dict, guardar_cita_anulada, anular_cita
-from models import Cita, Empresa, Pago, Producto, CitaAnulada, CitaModificada, CitaProducto
+from crud import crear_cita, cita_a_dict, anular_cita
+from models import Cita, Empresa, Pago, Producto, CitaAnulada, CitaModificada, CitaProducto, RelacionCodigoCita
 from schemas import (
     CitaCreate,
     CitaRead,
+    CodigoCitaResponse,
     EmpresaCreate,
     EmpresaSchema,
     PagoSchema,
@@ -24,7 +26,31 @@ Base.metadata.create_all(bind=engine)
 # Inicializar app
 app = FastAPI()
 
+# Entrada esperada
+class ValidarCodigoRequest(BaseModel):
+    numero_ticket: str
+    codigo_generado: str
 
+# ------------------------------
+# NUEVO: Middleware para capturar errores y garantizar CORS
+@app.middleware("http")
+async def catch_exceptions_middleware(request: Request, call_next):
+    try:
+        return await call_next(request)
+    except Exception as exc:
+        # Imprimir el error exacto en consola para depuración
+        print("[ERROR INTERNO FASTAPI]:", repr(exc))
+
+        # Respuesta de error genérica + headers CORS
+        response = JSONResponse(
+            status_code=500,
+            content={"detail": "Error interno del servidor. Consulta la consola del backend."}
+        )
+        response.headers["Access-Control-Allow-Origin"] = "*"
+        response.headers["Access-Control-Allow-Methods"] = "*"
+        response.headers["Access-Control-Allow-Headers"] = "*"
+        return response
+# ------------------------------
 
 #  Configuración de CORS para desarrollo local (Angular)
 origins = [
@@ -172,7 +198,51 @@ def historial_cita(cita_id: int, db: Session = Depends(get_db)):
         "anulaciones": [{"fecha": a.fecha_anulacion, "comentario": a.comentario} for a in anulaciones]
     }
 
-# Log en el backend
-@app.post("/citas", response_model=CitaRead)
-def guardar_cita(cita: CitaCreate, db: Session = Depends(get_db)):
-    print("CITA RECIBIDA:", cita.dict())  # <-- DEBUG
+# Obtener todas las citas
+@app.get("/citas", response_model=List[CitaRead])
+def obtener_todas_citas(db: Session = Depends(get_db)):
+    citas = db.query(Cita).all()
+    return [cita_a_dict(c) for c in citas]
+
+#obtener cita por númeo de ticket
+@app.get("/citas/ticket/{numero_ticket}")
+def obtener_cita_por_ticket(numero_ticket: str, db: Session = Depends(get_db)):
+    cita = db.query(Cita).filter(Cita.numero_ticket == numero_ticket).first()
+    if not cita:
+        raise HTTPException(status_code=404, detail="Cita no encontrada")
+    return cita_a_dict(cita)  # ¡Este dict ya incluye "estado"!
+
+@app.get("/citas/ticket/{numero_ticket}", response_model=CodigoCitaResponse)
+def obtener_codigo_por_ticket(numero_ticket: str, db: Session = Depends(get_db)):
+    relacion = db.query(RelacionCodigoCita).filter(RelacionCodigoCita.numero_ticket == numero_ticket).first()
+
+    if not relacion:
+        raise HTTPException(status_code=404, detail="Ticket no encontrado")
+
+    return relacion
+# Validar código de verificación
+@app.post("/citas/validar-codigo")
+def validar_codigo(data: ValidarCodigoRequest, db: Session = Depends(get_db)):
+    relacion = db.query(RelacionCodigoCita).filter(
+        RelacionCodigoCita.numero_ticket == data.numero_ticket,
+        RelacionCodigoCita.codigo_generado == data.codigo_generado,
+        RelacionCodigoCita.estado == "activo"
+    ).first()
+
+    if not relacion:
+        raise HTTPException(status_code=400, detail="Código incorrecto o ticket inválido.")
+
+    # Confirmamos si la cita aún existe y está activa
+    cita = db.query(Cita).filter(Cita.id == relacion.id_cita).first()
+    if not cita or cita.estado != "activa":
+        raise HTTPException(status_code=404, detail="Cita no encontrada o ya fue anulada.")
+
+    return {
+        "mensaje": "Código válido",
+        "id_cita": cita.id,
+        "estado": cita.estado,
+        "nombre": cita.nombre,
+        "apellido": cita.apellido,
+        "fecha": cita.fecha,
+        "hora": cita.hora.strftime("%H:%M"),
+    }
